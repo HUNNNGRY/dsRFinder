@@ -1,10 +1,12 @@
 ------------------------------------
 # prepare environment  & reference
 ------------------------------------
+(below only needed for 1st run)
 
 ssh baopengfei@101.6.121.24 # hub-remote
 
 ## global config variable
+```bash
 pre='/BioII/lulab_b/baopengfei/projects/WCHSU-FTC'
 SNPDir="/BioII/lulab_b/baopengfei/projects/exOmics/DNA-seq/ref/SNV_ref" # ~ARTDir
 SNPpre="common_all_20180418_chr"
@@ -13,18 +15,19 @@ ARTpre="somatic-hg38_1000g_pon"
 ARTbed="${SNPDir}/${ARTpre}_snp_sort_addStrandfilterChr.hg38.bed"
 cores=6
 tmpDir="tmp"
-
+```
 
 ## prepare&activate conda environment 
+### REDItools 
 ```bash
+#v>1.2.1 (20231010)
 cd /BioII/lulab_b/baopengfei/shared_reference/REDItools/testREDItools
-
-### REDItools version>1.2.1 env
-#20231010
 git clone https://github.com/BioinfoUNIBA/REDItools 
 mamba env create --name REDItools --file /BioII/lulab_b/baopengfei/gitsoft/REDItools/mamba_env.yml
+```
 
 ### modify REDItools
+```bash
 vi /BioII/lulab_b/baopengfei/shared_reference/REDItools/REDItoolDnaRna.py
 #special chr ID: ALR/Alpha__chr5___45962494____45970456_pos et al.
 #lead to REDItoolDnaRna.py when creating tmp dir using chr name
@@ -58,46 +61,56 @@ chrs=[x for x in dicregions.keys() if (x not in nochrs) and chr_list[x]]
 
 cp /BioII/lulab_b/baopengfei/shared_reference/REDItools/REDItoolDnaRna.py /BioII/lulab_b/baopengfei/mambaforge/envs/REDItools/bin/REDItoolDnaRna.py
 chmod 755 /BioII/lulab_b/baopengfei/mambaforge/envs/REDItools/bin/REDItoolDnaRna.py
+```
 
-	• raw: /BioII/lulab_b/baopengfei/gitsoft/REDItools/main/REDItoolDnaRna.py
-	• new: /BioII/lulab_b/baopengfei/mambaforge/envs/REDItools/bin/REDItoolDnaRna.py
+	• raw: /BioII/lulab_b/baopengfei/gitsoft/REDItools/main/REDItoolDnaRna.py (github)
+	• new: /BioII/lulab_b/baopengfei/mambaforge/envs/REDItools/bin/REDItoolDnaRna.py (self-optimized)
 
 
-### RNAfold env
+### RNAfold 
+```bash
+#v2.4.14
 mamba create -n py37 python=3.7 seaborn multiprocess
+```
 
-### IntaRNA v3.3.2 env
+### IntaRNA
+```bash
+#v3.3.2 
 mamba create -n IntaRNA -c conda-forge -c bioconda intarna
 ```
 
 ## prepare genome/transcriptome bin bed
+```bash
 ### genome
 binSize=50
 chrSize="${pre}/../exOmics/DNA-seq/genome/chrom.size"
 binBed="${pre}/../exOmics/DNA-seq/genome/hg38.bins.${binSize}.bed"
 
 bedtools makewindows -g ${chrSize} -w ${binSize} | awk '{print $1 "\t" $2 "\t" $3 "\t" "." "\t" "." "\t" "+"}'  > ${binBed}.tmp
-
+#add strand
 awk '{print $1 "\t" $2 "\t" $3 "\t" "." "\t" "." "\t" "-"}' ${binBed}.tmp >  ${binBed}.tmp2
 cat ${binBed}.tmp ${binBed}.tmp2 | sort -k1,1 -k2,2n > ${binBed}
 rm ${binBed}.tmp*
 
 ### transcriptome 
 bedtools makewindows -g ${chrSize} -w ${binSize} | awk '{print $1 "\t" $2 "\t" $3 "\t" "." "\t" "." "\t" "+"}'  > ${binBed}
-
+```
 
 ## prepare filtering reference
+```bash
 ### download reference
 #### SNP
 option1: All_20180418.vcf.gz (too large): 
 wget -c ftp://ftp.ncbi.nih.gov/snp/organisms/human_9606/VCF/All_20180418.vcf.gz
 option2: common_all_20180418.vcf.gz (this reduced set might be better):
 wget -c ftp://ftp.ncbi.nih.gov/snp/organisms/human_9606/VCF/common_all_20180418.vcf.gz 
-
+#convert chr naming from ensembl to UCSC
 zcat common_all_20180418.vcf.gz | awk '{if($0 !~ /^#/) print "chr"$0; else print $0}' | gzip -c > $SNPDir/common_all_20180418_chr.vcf.gz
 
 #### seq_artifacts+germline_SNV
 somatic-hg38_1000g_pon.hg38.vcf.gz: https://console.cloud.google.com/storage/browser/gatk-best-practices/somatic-hg38
+```
+
 
 ### SNP & seq_artifacts+germline_SNV vcf2bed
 ```bash
@@ -267,15 +280,17 @@ Notes:
 	• dsRFinder do not need EM if we only focus on finding potential dsRNA regions, quantification of dsRNA could be considered as indepedent process, including re-mapping bam using STAR parameter that suit multi-mapped reads and quantify using tools like Complete-seq or TEtranscript
 
 
-
+```bash
 sample_id="REDItoolDnaRna_filterSNPinREDItools"
 inBam="/BioII/lulab_b/baopengfei/shared_reference/REDItools/testREDItools/merge19_sort_subset01.bam" # 0.01
+#inBam="/BioII/lulab_b/baopengfei/projects/WCHSU-FTC/output/GSE71008_NCpool/tbam/NCpool/bam-EM/merge19_sort/merged.sorted.bam"
 outDir="output/GSE71008_19_subset01/${sample_id}"
 SNPgff="${SNPbed}.tx.sorted.gff.gz"
 ARTgff="${ARTbed}.tx.sorted.gff.gz"
 SNPARTgff="${SNPDir}/SNP_germlineSNV-seqArtifact.tx.sorted.gff.gz"
 binSize=50
 chrSize="${pre}/exSeek-dev/genome/hg38/chrom_sizes/transcriptome_sort_uniq_newTxID"
+#cat /BioII/lulab_b/baopengfei/projects/WCHSU-FTC/exSeek-dev/genome/hg38/chrom_sizes/transcriptome_genome_sort_uniq_newTxID  | grep -v "^chr" | grep -v "_miR_" | grep -v "^hsa____">  ${chrSize}
 binBed="${pre}/exSeek-dev/genome/hg38/tbed/transcriptome_sort_uniq_newTxID.bins.${binSize}.bed6"
 gnFa="/BioII/lulab_b/baopengfei/projects/WCHSU-FTC/exSeek-dev/genome/hg38/fasta_newTxID/combine19.fa"
 EERNum=3 # cutoff of of EER num in $binSize bin
@@ -283,10 +298,10 @@ extSize=25 # extended length each side of merged EER bins, usually half of binSi
 minLen=50 # min length of extended merged EER bins
 maxLen=2000 # max length of extended merged EER bins
 mkdir -p $outDir
-
+```
 
 ## run EM on bowtie2 bam
-done by cfPeak
+run within cfPeak
 
 
 ## run REDItools
