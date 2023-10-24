@@ -1,9 +1,21 @@
 ------------------------------------
 # prepare environment  & reference
 ------------------------------------
-## prepare&activate conda environment 
+
 ssh baopengfei@101.6.121.24 # hub-remote
 
+## global config variable
+pre='/BioII/lulab_b/baopengfei/projects/WCHSU-FTC'
+SNPDir="/BioII/lulab_b/baopengfei/projects/exOmics/DNA-seq/ref/SNV_ref" # ~ARTDir
+SNPpre="common_all_20180418_chr"
+SNPbed="${SNPDir}/${SNPpre}_snp_sort_addStrandfilterChr.hg38.bed"
+ARTpre="somatic-hg38_1000g_pon"
+ARTbed="${SNPDir}/${ARTpre}_snp_sort_addStrandfilterChr.hg38.bed"
+cores=6
+tmpDir="tmp"
+
+
+## prepare&activate conda environment 
 ```bash
 cd /BioII/lulab_b/baopengfei/shared_reference/REDItools/testREDItools
 
@@ -12,31 +24,65 @@ cd /BioII/lulab_b/baopengfei/shared_reference/REDItools/testREDItools
 git clone https://github.com/BioinfoUNIBA/REDItools 
 mamba env create --name REDItools --file /BioII/lulab_b/baopengfei/gitsoft/REDItools/mamba_env.yml
 
+### modify REDItools
+vi /BioII/lulab_b/baopengfei/shared_reference/REDItools/REDItoolDnaRna.py
+#special chr ID: ALR/Alpha__chr5___45962494____45970456_pos et al.
+#lead to REDItoolDnaRna.py when creating tmp dir using chr name
+#need modify REDItoolDnaRna.py for tx Bam:
+        if not os.path.exists(os.path.dirname(outfile)):
+                os.makedirs(os.path.dirname(outfile))
+
+#delete empty dir
+def remove_empty_folders(path_abs):
+    walk = list(os.walk(path_abs))
+    for path, _, _ in walk[::-1]:
+        if len(os.listdir(path)) == 0:
+            os.remove(path)
+remove_empty_folders(outfolder)
+
+#~844th row, add abelow to reduce iteration range
+chr_list={}
+min_count=10 
+# bamfile = pysam.AlignmentFile(bamfile, "rb")
+chromosomes = bamfile.references
+#Iterate over each chromosome in the BAM file
+for chrom in dicregions.keys():
+    # Get the count of reads for the current chromosome
+    count = bamfile.count(chrom)
+    # If the count is greater than or equal to the minimum threshold, keep the chromosome
+    if count >= min_count:
+        # Iterate over each read in the current chromosome and write it to the output file
+        chr_list[chrom] = count
+# bamfile.close()
+chrs=[x for x in dicregions.keys() if (x not in nochrs) and chr_list[x]]
+
+cp /BioII/lulab_b/baopengfei/shared_reference/REDItools/REDItoolDnaRna.py /BioII/lulab_b/baopengfei/mambaforge/envs/REDItools/bin/REDItoolDnaRna.py
+chmod 755 /BioII/lulab_b/baopengfei/mambaforge/envs/REDItools/bin/REDItoolDnaRna.py
+
+	• raw: /BioII/lulab_b/baopengfei/gitsoft/REDItools/main/REDItoolDnaRna.py
+	• new: /BioII/lulab_b/baopengfei/mambaforge/envs/REDItools/bin/REDItoolDnaRna.py
+
+
 ### RNAfold env
 mamba create -n py37 python=3.7 seaborn multiprocess
 
 ### IntaRNA v3.3.2 env
 mamba create -n IntaRNA -c conda-forge -c bioconda intarna
 ```
-## prepare genome/transcriptome bin bed
-binSize=50
-pre='/BioII/lulab_b/baopengfei/projects/WCHSU-FTC'
 
+## prepare genome/transcriptome bin bed
 ### genome
+binSize=50
 chrSize="${pre}/../exOmics/DNA-seq/genome/chrom.size"
-binBed="${pre}/hg38.bins.${binSize}.bed"
+binBed="${pre}/../exOmics/DNA-seq/genome/hg38.bins.${binSize}.bed"
 
 bedtools makewindows -g ${chrSize} -w ${binSize} | awk '{print $1 "\t" $2 "\t" $3 "\t" "." "\t" "." "\t" "+"}'  > ${binBed}.tmp
-#add strand
+
 awk '{print $1 "\t" $2 "\t" $3 "\t" "." "\t" "." "\t" "-"}' ${binBed}.tmp >  ${binBed}.tmp2
 cat ${binBed}.tmp ${binBed}.tmp2 | sort -k1,1 -k2,2n > ${binBed}
-
+rm ${binBed}.tmp*
 
 ### transcriptome 
-chrSize='${pre}/exSeek-dev/genome/hg38/chrom_sizes/transcriptome_sort_uniq_newTxID'
-binBed='${pre}/exSeek-dev/genome/hg38/tbed/transcriptome_sort_uniq_newTxID.bins.${binSize}.bed6'
-
-cat /BioII/lulab_b/baopengfei/projects/WCHSU-FTC/exSeek-dev/genome/hg38/chrom_sizes/transcriptome_genome_sort_uniq_newTxID  | grep -v "^chr" | grep -v "_miR_" | grep -v "^hsa____">  ${chrSize}
 bedtools makewindows -g ${chrSize} -w ${binSize} | awk '{print $1 "\t" $2 "\t" $3 "\t" "." "\t" "." "\t" "+"}'  > ${binBed}
 
 
@@ -45,25 +91,22 @@ bedtools makewindows -g ${chrSize} -w ${binSize} | awk '{print $1 "\t" $2 "\t" $
 #### SNP
 option1: All_20180418.vcf.gz (too large): 
 wget -c ftp://ftp.ncbi.nih.gov/snp/organisms/human_9606/VCF/All_20180418.vcf.gz
-option2: common_all_20180418.vcf.gz (might be better):
+option2: common_all_20180418.vcf.gz (this reduced set might be better):
 wget -c ftp://ftp.ncbi.nih.gov/snp/organisms/human_9606/VCF/common_all_20180418.vcf.gz 
-#convert chr naming from ensembl to UCSC
-zcat common_all_20180418.vcf.gz | awk '{if($0 !~ /^#/) print "chr"$0; else print $0}' | gzip -c > common_all_20180418_chr.vcf.gz
+
+zcat common_all_20180418.vcf.gz | awk '{if($0 !~ /^#/) print "chr"$0; else print $0}' | gzip -c > $SNPDir/common_all_20180418_chr.vcf.gz
 
 #### seq_artifacts+germline_SNV
 somatic-hg38_1000g_pon.hg38.vcf.gz: https://console.cloud.google.com/storage/browser/gatk-best-practices/somatic-hg38
 
-### SNP & seq_artifacts+germline_SNV vcf2bed (only needed for 1st run)
+### SNP & seq_artifacts+germline_SNV vcf2bed
 ```bash
-SNPDir="/BioII/lulab_b/baopengfei/projects/exOmics/DNA-seq/ref/SNV_ref"
+cd $SNPDir
 alias bcftools="/BioII/lulab_b/baopengfei/anaconda3/bin/bcftools"
 alias vcf2bed="/BioII/lulab_b/baopengfei/gitsoft/bedops_v2.4.40/vcf2bed"
-cd $SNPDir
 
 #### SNP
 #keep snp only
-SNPpre="common_all_20180418_chr"
-SNPbed="${SNPDir}/${SNPpre}_snp_sort_addStrandfilterChr.hg38.bed"
 bcftools view -v snps ${SNPDir}/${SNPpre}.vcf.gz | perl -lane 'BEGIN {srand(1984)} if (/^#/) { print } elsif (length($F[3]) == 1) { if (rand(1) > 0.5) {print} }' | bgzip > ${SNPDir}/${SNPpre}_snp.hg38.vcf.gz
 gzip -dc ${SNPDir}/${SNPpre}_snp.hg38.vcf.gz > ${SNPDir}/${SNPpre}_snp.hg38.vcf
 
@@ -86,8 +129,6 @@ rm ${SNPDir}/${SNPpre}_snp.hg38.vcf
 
 #### seq_artifacts+germline_SNV
 #keep snp only
-ARTpre="somatic-hg38_1000g_pon"
-ARTbed="${SNPDir}/${ARTpre}_snp_sort_addStrandfilterChr.hg38.bed"
 bcftools view -v snps ${SNPDir}/${ARTpre}.hg38.vcf.gz | perl -lane 'BEGIN {srand(1984)} if (/^#/) { print } elsif (length($F[3]) == 1) { if (rand(1) > 0.5) {print} }' | bgzip > ${SNPDir}/${ARTpre}_snp.hg38.vcf.gz
 gzip -dc ${SNPDir}/${ARTpre}_snp.hg38.vcf.gz > ${SNPDir}/${ARTpre}_snp.hg38.vcf
 
@@ -100,32 +141,6 @@ rm ${SNPDir}/${ARTpre}_snp.hg38.vcf
 ```
 
 
-### convert bed to gff/gtf (gn-mode-only)
-```bash
-#### SNP
-python2 /BioII/lulab_b/baopengfei/biosoft/bed2gtf.py \
-	-i ${SNPbed} \
-	-o ${SNPbed}.gtf
-	
-#### seq_artifacts+germline_SNV
-python2 /BioII/lulab_b/baopengfei/biosoft/bed2gtf.py \
-	-i ${ARTbed} \
-	-o ${ARTbed}.gtf
-```
-
-### convert gtf to gff.gz (gn-mode-only)
-```bash
-tmpDir='tmp'
-ulimit -n 4000
-
-#### SNP
-GFFtoTabix.py -i ${SNPbed}.gtf -b 300000 -t $tmpDir > $tmpDir/log1 2>&1 &
-rm ${SNPbed}.gtf 
-
-#### seq_artifacts+germline_SNV
-GFFtoTabix.py -i ${ARTbed}.gtf -b 300000 -t $tmpDir > $tmpDir/log2 2>&1 &
-rm ${ARTbed}.gtf 
-```
 
 ### convert gn coordinate to tx coordinate (tx-mode-only)
 ```bash
@@ -181,8 +196,20 @@ cat ${ARTbed}.tx.{RNA,DNA} | sort -k1,1 -k2,2n > ${ARTbed}.tx
 rm  ${ARTbed}.tx.{RNA,DNA} 
 ```
 
-### convert bed to gff/gtf (tx-mode-only)
+### convert bed to gtf
 ```bash
+#gn
+#### SNP
+python2 /BioII/lulab_b/baopengfei/biosoft/bed2gtf.py \
+	-i ${SNPbed} \
+	-o ${SNPbed}.gtf
+	
+#### seq_artifacts+germline_SNV
+python2 /BioII/lulab_b/baopengfei/biosoft/bed2gtf.py \
+	-i ${ARTbed} \
+	-o ${ARTbed}.gtf
+
+#tx
 #### SNP
 python2 /BioII/lulab_b/baopengfei/biosoft/bed2gtf.py \
 	-i ${SNPbed}.tx \
@@ -194,15 +221,139 @@ python2 /BioII/lulab_b/baopengfei/biosoft/bed2gtf.py \
 	-o ${ARTbed}.tx.gtf
 ```
 
-### convert gtf to gff.gz (tx-mode-only)
+### convert gtf to gff.gz
 ```bash
+ulimit -n 4000
+
+#gn
 #### SNP
-GFFtoTabix.py -b 300000 -i ${SNPbed}.tx.gtf > $tmpDir/log1 2>&1 &
+GFFtoTabix.py -i ${SNPbed}.gtf -b 300000 -t $tmpDir > $tmpDir/gn_log1 2>&1 # 33630436
+rm ${SNPbed}.gtf 
+
+#### seq_artifacts+germline_SNV
+GFFtoTabix.py -i ${ARTbed}.gtf -b 300000 -t $tmpDir > $tmpDir/gn_log2 2>&1 # 2262418
+rm ${ARTbed}.gtf 
+
+#### combine
+cat ${SNPbed}.sorted.gff > $tmpDir/gn_SNPbed & 
+cat ${ARTbed}.sorted.gff > $tmpDir/gn_ARTbed 
+cat $tmpDir/gn_ARTbed $tmpDir/gn_SNPbed | sort -k1,1 -k4,4n | uniq | bgzip -c > $SNPDir/SNP_germlineSNV-seqArtifact.sorted.gff.gz # 34840978
+tabix  $SNPDir/SNP_germlineSNV-seqArtifact.sorted.gff.gz
+
+#tx
+#### SNP
+GFFtoTabix.py -b 300000 -i ${SNPbed}.tx.gtf > $tmpDir/log1 2>&1 # 18825510
 rm ${SNPbed}.tx.gtf
 
 #### seq_artifacts+germline_SNV
-GFFtoTabix.py -b 300000 -i ${ARTbed}.tx.gtf > $tmpDir/log2 2>&1 &
+GFFtoTabix.py -b 300000 -i ${ARTbed}.tx.gtf > $tmpDir/log2 2>&1 # 1243549
 rm ${ARTbed}.tx.gtf
+
+#### combine
+cat ${SNPbed}.tx.sorted.gff > $tmpDir/tx_SNPbed &
+cat ${ARTbed}.tx.sorted.gff > $tmpDir/tx_ARTbed
+cat $tmpDir/tx_ARTbed $tmpDir/tx_SNPbed | sort -k1,1 -k4,4n | uniq | bgzip -c > $SNPDir/SNP_germlineSNV-seqArtifact.tx.sorted.gff.gz # 19502715
+tabix  $SNPDir/SNP_germlineSNV-seqArtifact.tx.sorted.gff.gz 
+```
+
+
+
+
+------------------------------------
+dsRNAfinder (transcript mode)
+------------------------------------
+Notes:
+	• EM-reassign bowtie2 bam embeded in cfPeak limited to 10-500nt insertion (PE merged into SE as insertion fragment before mapping), further adaptation of PE input and longer insertion fragment might be added 
+	• dsRFinder do not need EM if we only focus on finding potential dsRNA regions, quantification of dsRNA could be considered as indepedent process, including re-mapping bam using STAR parameter that suit multi-mapped reads and quantify using tools like Complete-seq or TEtranscript
+
+
+
+sample_id="REDItoolDnaRna_filterSNPinREDItools"
+inBam="/BioII/lulab_b/baopengfei/shared_reference/REDItools/testREDItools/merge19_sort_subset01.bam" # 0.01
+outDir="output/GSE71008_19_subset01/${sample_id}"
+SNPgff="${SNPbed}.tx.sorted.gff.gz"
+ARTgff="${ARTbed}.tx.sorted.gff.gz"
+SNPARTgff="${SNPDir}/SNP_germlineSNV-seqArtifact.tx.sorted.gff.gz"
+binSize=50
+chrSize="${pre}/exSeek-dev/genome/hg38/chrom_sizes/transcriptome_sort_uniq_newTxID"
+binBed="${pre}/exSeek-dev/genome/hg38/tbed/transcriptome_sort_uniq_newTxID.bins.${binSize}.bed6"
+gnFa="/BioII/lulab_b/baopengfei/projects/WCHSU-FTC/exSeek-dev/genome/hg38/fasta_newTxID/combine19.fa"
+EERNum=3 # cutoff of of EER num in $binSize bin
+extSize=25 # extended length each side of merged EER bins, usually half of binSize
+minLen=50 # min length of extended merged EER bins
+maxLen=2000 # max length of extended merged EER bins
+mkdir -p $outDir
+
+
+## run EM on bowtie2 bam
+done by cfPeak
+
+
+## run REDItools
+```bash
+source /BioII/lulab_b/baopengfei/mambaforge/bin/activate REDItools
+
+REDItoolDnaRna.py -t ${cores} \
+	-K ${SNPARTgff} \
+	-i ${inBam} \
+	-f ${gnFa} \
+	-o ${outDir} \
+	> ${outDir}/log 2>&1 &
+#-K $SNPDir/SNP_germlineSNV-seqArtifact.tx.sorted.gff.gz \
+#tx: hub 12cores?, 5h, 121354 records
+#tx: cnode 6cores?, >24h, 120742 records
+#gn: hub 12cores?, 2.5h, 40285769 records
+#gn: cnode 6cores, 2.5h, 40070905 records 
+
+#tx:  0.1  subset, cnode 6cores, 2.5h, 48074 records
+#tx:  0.01subset, cnode 6cores, 0.5h, 8742 records
+#gn: 0.01subset, cnode 6cores, 2min, 96503/97227 records
+
+
+pid=`head -n3 ${outDir}/log | grep "Analysis ID" | sed s/"Analysis ID: "/""/g`
+rediTab="${outDir}/DnaRna_${pid}/outTable_${pid}"
+```
+
+## get EER cluster
+```bash
+bash scripts/getEERcluster.sh \
+	$rediTab \
+	$chrSize \
+	$gnFa \
+	$binBed \
+	$EERnum \
+	$binSize \
+	$extSize \
+	$minLen \
+	$maxLen \
+	$tmpDir
+```
+
+## get intracellular stable EER cluster
+```bash
+source /BioII/lulab_b/baopengfei/mambaforge/bin/activate py37
+${pre}/exSeek-dev/scripts/rnafold_dinushuffle_parallel.py  \
+	${rediTab}_filter_sort.bed6.count.merge.ext.filterLen.fa 50 1234 ${rediTab}_filter_sort.bed6.count.merge.ext.filterLen.fa.csv ${cores} \
+	> ${rediTab}_filter_sort.bed6.count.merge.ext.filterLen.fa.log 2>&1
+rm ${rediTab}_filter_sort.bed6.count.merge.ext.filterLen.fa_perm
+#tx:  0.01subset, cnode 6cores, 0.1h, 922 records
+
+## convert tx to gn (tx-only)
+txBed=${rediTab}_filter_sort.bed6.count.merge.ext.filterLen
+gnBed=${rediTab}_filter_sort.bed6.count.merge.ext.filterLen_gn.bed
+{{
+  grep -v '^chr' ${txBed} | $pre/exSeek-dev/bin/tbed2gbed <(cat  $pre/exSeek-dev/genome/hg38/bed/{long_DNA,long_RNA,tRNA,pri_miRNA,piRNA,rRNA}_newTxID.bed) /dev/stdin /dev/stdout
+  awk 'BEGIN{{OFS="\t";FS="\t"}}/^chr/{{print $1,$2,$3,$4,$5,$6,0,0,0,1,$3-$2,0}}' ${txBed}
+}} > ${gnBed}
+```
+
+## todo: inter-molecular
+```bash
+source /BioII/lulab_b/baopengfei/mambaforge/bin/activate IntaRNA
+
+IntaRNA --threads 4 -q query.fa -t target.fa > outpre
+
+
 ```
 
 
@@ -211,8 +362,27 @@ rm ${ARTbed}.tx.gtf
 ------------------------------------
 dsRNAfinder (genome mode)
 ------------------------------------
-## run EM on STAR bam (holding)
 ssh hub
+
+```bash
+sample_id="REDItoolDnaRna_filterSNPinREDItools"
+inBam="/BioII/lulab_b/baopengfei/shared_reference/REDItools/testREDItools/hg38_v38_sortbyCoord_subset01.bam" # 0.01
+#inBam="/BioII/lulab_b/baopengfei/tmp/20230523-S048-1_BC11/hg38_v38_sortbyCoord.bam"
+outDir="output/SLE_subset01/${sample_id}"
+SNPgff="${SNPbed}.sorted.gff.gz"
+ARTgff="${ARTbed}.sorted.gff.gz"
+SNPARTgff="${SNPDir}/SNP_germlineSNV-seqArtifact.sorted.gff.gz"
+binSize=50
+chrSize="${pre}/../exOmics/DNA-seq/genome/chrom.size"
+binBed="${pre}/../exOmics/DNA-seq/genome/hg38.bins.${binSize}.bed"
+gnFa="/BioII/lulab_b/baopengfei/shared_reference/hg38/genome.fa"
+EERNum=3 # cutoff of of EER num in $binSize bin
+extSize=25 # extended length each side of merged EER bins
+minLen=50 # min length of extended merged EER bins
+maxLen=2000 # max length of extended merged EER bins
+```
+
+## run EM on STAR bam (holding)
 ```bash
 #current cfRNA-SEEK total pipeline only report 1 best align record for multi-align reads, if you need further quantification on repeats dsRNA, not just determination of dsRNA positions, we need remap bam using flag: --outSAMmultNmax -1 --outFilterMultimapNmax 100, and then run EM-rescue below:
 rawBam="~/tmp/20230523-S048-1_BC11/hg38_v38_sortbyCoord.bam"
@@ -231,293 +401,19 @@ samtools index -@ 4 ${emDir}/merged.sorted.bam
 rm ${emDir}/merged.bam
 ```
 
+
 ## run REDItools
+same module of tx
+
+
+## get EER cluster
+same module of tx
+
+## get intracellular stable EER cluster
+same module of tx
+
+
+## todo: annotation (gn mode only)
 ```bash
-source activate REDItools
-
-cores=10
-tmpDir='tmp'
-sample_id='test'
-inBam='/BioII/lulab_b/baopengfei/tmp/20230523-S048-1_BC11/hg38_v38_sortbyCoord.bam'
-gnFa='/BioII/lulab_b/baopengfei/shared_reference/hg38/genome.fa'
-outDir='output/SLE/REDItoolDnaRna'
-
-mkdir -p $outDir
-REDItoolDnaRna.py -t ${cores} \
-	-i ${inBam} \
-	-f ${gnFa} \
-	-o ${outDir} \
-	> ${outDir}/log 2>&1 &
-#40285769 records
-```
-
-## test dsRNAfinder-downstream
-```bash
-### rm SNP in REDItools tab
-#extract pid
-pid=`head -n3 ${outDir}/log | grep "Analysis ID" | sed s/"Analysis ID: "/""/g`
-rediTab="../output/GSE71008/REDItoolDnaRna/outTable_${pid}"
-SNPgff='${SNPbed}.tx.gff.gz'
-FilterTable.py \
-	-i ${rediTab} \
-	-s ${SNPgff} \
-	-S peak \
-	-o ${rediTab}_tmp \
-	-E -p
-#6/96877 rm
-
-
-## filter seq_artifacts+germline_SNV sites
-ARTgff='${ARTbed}.tx.gff.gz'
-FilterTable.py \
-	-i ${rediTab}_tmp \
-	-s ${ARTgff} \
-	-S peak \
-	-o ${rediTab}_filter \
-	-E -p
-#?/? rm
-
-
-
-## filter EER-cluster bins
-### count&filter
-TableToGFF.py \
-	-i ${rediTab}_filter \
-	-s -t \
-	-o ${rediTab}_filter.gff
-gff2bed < ${rediTab}_filter.gff \
-	> ${rediTab}_filter_sort.bed
-cut -f1-6 ${rediTab}_filter_sort.bed >  ${rediTab}_filter_sort.bed6
-
-cat ${rediTab}_filter_sort.bed6 \
-            | bedtools sort \
-	   | sort -k1,1 -k2,2n \
-            | bedtools coverage -s -sorted -counts \
-		-g ${chrSize} \
-                -a ${binBed} -b - \
-            | awk 'BEGIN{{OFS="\t";FS="\t"}}{{print $1,$2,$3,$4,$7,$6}}' \
-	| awk -v num=${EERNum} '($5>=num) {print $0}' \
-                > ${rediTab}_filter_sort.bed6.count
-
-(### optional: append editing sites position to Tab/bed)
-#bedtools intersect ... 
-#bedtools merge ... -c 2 -o collapse
-
-
-## merge&extend EER-cluster bins
-#note that extended region has potential editing sites, we neglect for current version
-extSize=25
-bedtools merge -s -d ${binSize} -c 4,5,6 -o distinct,sum,distinct -i ${rediTab}_filter_sort.bed6.count > ${rediTab}_filter_sort.bed6.count.merge
-bedtools slop -s -l ${extSize} -r ${extSize} -g ${chrSize} \
-	-i ${rediTab}_filter_sort.bed6.count.merge \
-	> ${rediTab}_filter_sort.bed6.count.merge.ext
-
-## filter length & add name
-minLen=50
-maxLen=3000
-awk -v minL=${minLen} -v maxL=${maxLen} '(($3-$2)>=minL) && (($3-$2)<=maxL) {print $0}' ${rediTab}_filter_sort.bed6.count.merge.ext \
-| awk '{print $1 "\t" $2 "\t" $3 "\t" $1":"$2"-"$3"_"$6 "\t" $5 "\t" $6}' \
-> ${rediTab}_filter_sort.bed6.count.merge.ext.filterLen
-
-
-## RNAfold
-### extract fa
-bedtools getfasta -nameOnly -s \
-	-fi ${gnFa} \
-	-bed ${rediTab}_filter_sort.bed6.count.merge.ext.filterLen \
-	> ${rediTab}_filter_sort.bed6.count.merge.ext.filterLen.fa
-	
-### get MFE FDR
-source activate py37
-python3 \
-	${pre}/exSeek-dev/scripts/rnafold_dinushuffle_parallel.py  \
-	${rediTab}_filter_sort.bed6.count.merge.ext.filterLen.fa 200 1234 ${inFile}.csv
-rm ${inFile}_perm
-
-
-## convert tx to gn (tx-only)
-gnBed=${rediTab}_filter_sort.bed6.count.merge.ext.filterLen_gn.bed
-mv ${rediTab}_filter_sort.bed6.count.merge.ext.filterLen $gnBed
-
-(## optional: filter tRNA,miRNA?)
-
-
-## todo: annotation
 /BioII/lulab_b/baopengfei/projects/motif-RBP-EDA/scripts/lulab/sequential.assign.long.sh
 ```
-
-## todo: inter-molecular
-```bash
-source activate IntaRNA
-
-IntaRNA --threads 4 -q query.fa -t target.fa > outpre
-```
-
-
-
-
-------------------------------------
-dsRNAfinder (transcript mode)
-------------------------------------
-## modify REDItools 
-vi /BioII/lulab_b/baopengfei/shared_reference/REDItools/REDItoolDnaRna.py
-#special chr ID: ALR/Alpha__chr5___45962494____45970456_pos et al.
-#lead to REDItoolDnaRna.py when creating tmp dir using chr name
-#need modify REDItoolDnaRna.py for tx Bam:
-        if not os.path.exists(os.path.dirname(outfile)):
-                os.makedirs(os.path.dirname(outfile))
-
-#delete empty dir
-def remove_empty_folders(path_abs):
-    walk = list(os.walk(path_abs))
-    for path, _, _ in walk[::-1]:
-        if len(os.listdir(path)) == 0:
-            os.remove(path)
-remove_empty_folders(outfolder)
-
-#~844th row, add abelow to reduce iteration range
-chr_list={}
-min_count=10 
-# bamfile = pysam.AlignmentFile(bamfile, "rb")
-chromosomes = bamfile.references
-# Iterate over each chromosome in the BAM file
-for chrom in dicregions.keys():
-    # Get the count of reads for the current chromosome
-    count = bamfile.count(chrom)
-    # If the count is greater than or equal to the minimum threshold, keep the chromosome
-    if count >= min_count:
-        # Iterate over each read in the current chromosome and write it to the output file
-        chr_list[chrom] = count
-# bamfile.close()
-chrs=[x for x in dicregions.keys() if (x not in nochrs) and chr_list[x]]
-
-cp /BioII/lulab_b/baopengfei/shared_reference/REDItools/REDItoolDnaRna.py /BioII/lulab_b/baopengfei/mambaforge/envs/REDItools/bin/REDItoolDnaRna.py
-chmod 755 /BioII/lulab_b/baopengfei/mambaforge/envs/REDItools/bin/REDItoolDnaRna.py
-
-
-## run REDItools
-```bash
-source activate REDItools
-
-cores=8
-tmpDir='tmp'
-sample_id='REDItoolDnaRna'
-inBam="/BioII/lulab_b/baopengfei/projects/WCHSU-FTC/output/GSE71008_NCpool/tbam/NCpool/bam-EM/merge19_sort/merged.sorted.bam"
-#inBam="./merge19_sort_subset01.bam"
-#inBam="./testREDItools/tx_19.bam"
-gnFa="/BioII/lulab_b/baopengfei/projects/WCHSU-FTC/exSeek-dev/genome/hg38/fasta_newTxID/combine19.fa"
-#outDir="output/GSE71008_19/REDItoolDnaRna"
-outDir="output/GSE71008_19/${sample_id}"
-mkdir -p $outDir
-
-
-REDItoolDnaRna.py -t ${cores} \
-	-i ${inBam} \
-	-f ${gnFa} \
-	-o ${outDir} \
-	> ${outDir}/log 2>&1 &
-#?h, ? records
-```
-
-## test dsRNAfinder-downstream
-```bash
-### rm SNP in REDItools tab
-#extract pid
-pid=`head -n3 ${outDir}/log | grep "Analysis ID" | sed s/"Analysis ID: "/""/g`
-rediTab="${outDir}/DnaRna_${pid}/outTable_${pid}"
-SNPgff="${SNPbed}.tx.sorted.gff.gz"
-FilterTable.py \
-	-i ${rediTab} \
-	-s ${SNPgff} \
-	-S peak \
-	-o ${rediTab}_tmp \
-	-E -p
-#6/96877 rm
-
-
-## filter seq_artifacts+germline_SNV sites
-ARTgff="${ARTbed}.tx.sorted.gff.gz"
-FilterTable.py \
-	-i ${rediTab}_tmp \
-	-s ${ARTgff} \
-	-S peak \
-	-o ${rediTab}_filter \
-	-E -p
-#?/? rm
-
-
-
-## filter EER-cluster bins
-### count&filter
-TableToGFF.py \
-	-i ${rediTab}_filter \
-	-s -t \
-	-o ${rediTab}_filter.gff
-gff2bed < ${rediTab}_filter.gff \
-	> ${rediTab}_filter_sort.bed
-cut -f1-6 ${rediTab}_filter_sort.bed >  ${rediTab}_filter_sort.bed6
-
-cat ${rediTab}_filter_sort.bed6 \
-            | bedtools sort \
-	   | sort -k1,1 -k2,2n \
-            | bedtools coverage -s -sorted -counts \
-		-g ${chrSize} \
-                -a ${binBed} -b - \
-            | awk 'BEGIN{{OFS="\t";FS="\t"}}{{print $1,$2,$3,$4,$7,$6}}' \
-	| awk -v num=${EERNum} '($5>=num) {print $0}' \
-                > ${rediTab}_filter_sort.bed6.count
-
-(### optional: append editing sites position to Tab/bed)
-#bedtools intersect ... 
-#bedtools merge ... -c 2 -o collapse
-
-
-## merge&extend EER-cluster bins
-#note that extended region has potential editing sites, we neglect for current version
-extSize=25
-bedtools merge -s -d ${binSize} -c 4,5,6 -o distinct,sum,distinct -i ${rediTab}_filter_sort.bed6.count > ${rediTab}_filter_sort.bed6.count.merge
-bedtools slop -s -l ${extSize} -r ${extSize} -g ${chrSize} \
-	-i ${rediTab}_filter_sort.bed6.count.merge \
-	> ${rediTab}_filter_sort.bed6.count.merge.ext
-
-## filter length & add name
-minLen=50
-maxLen=3000
-awk -v minL=${minLen} -v maxL=${maxLen} '(($3-$2)>=minL) && (($3-$2)<=maxL) {print $0}' ${rediTab}_filter_sort.bed6.count.merge.ext \
-| awk '{print $1 "\t" $2 "\t" $3 "\t" $1":"$2"-"$3"_"$6 "\t" $5 "\t" $6}' \
-> ${rediTab}_filter_sort.bed6.count.merge.ext.filterLen
-
-
-## RNAfold
-### extract fa
-bedtools getfasta -nameOnly -s \
-	-fi ${gnFa} \
-	-bed ${rediTab}_filter_sort.bed6.count.merge.ext.filterLen \
-	> ${rediTab}_filter_sort.bed6.count.merge.ext.filterLen.fa
-	
-### get MFE FDR
-source activate py37 \
-	${pre}/exSeek-dev/scripts/rnafold_dinushuffle_parallel.py  \
-	${rediTab}_filter_sort.bed6.count.merge.ext.filterLen.fa 200 1234 ${inFile}.csv
-rm ${inFile}_perm
-
-
-## convert tx to gn (tx-only)
-txBed=${rediTab}_filter_sort.bed6.count.merge.ext.filterLen
-gnBed=${rediTab}_filter_sort.bed6.count.merge.ext.filterLen_gn.bed
-{{
-  grep -v '^chr' ${txBed} | $pre/exSeek-dev/bin/tbed2gbed <(cat  $pre/exSeek-dev/genome/hg38/bed/{long_DNA,long_RNA,tRNA,pri_miRNA,piRNA,rRNA}_newTxID.bed) /dev/stdin /dev/stdout
-  awk 'BEGIN{{OFS="\t";FS="\t"}}/^chr/{{print $1,$2,$3,$4,$5,$6,0,0,0,1,$3-$2,0}}' ${txBed}
-}} > ${gnBed}
-
-
-(## optional: filter tRNA,miRNA?)
-```
-
-## todo: inter-molecular
-```bash
-source activate IntaRNA
-
-IntaRNA --threads 4 -q query.fa -t target.fa > outpre
-```
-
